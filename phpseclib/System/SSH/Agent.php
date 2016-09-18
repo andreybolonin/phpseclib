@@ -33,9 +33,10 @@
 
 namespace phpseclib\System\SSH;
 
+use ParagonIE\ConstantTime\Base64;
 use phpseclib\Crypt\RSA;
-use phpseclib\System\SSH\Agent\Identity;
 use phpseclib\Exception\BadConfigurationException;
+use phpseclib\System\SSH\Agent\Identity;
 
 /**
  * Pure-PHP ssh-agent client identity factory
@@ -130,7 +131,7 @@ class Agent
                 $address = $_ENV['SSH_AUTH_SOCK'];
                 break;
             default:
-                throw new \BadConfigurationException('SSH_AUTH_SOCK not found');
+                throw new BadConfigurationException('SSH_AUTH_SOCK not found');
         }
 
         $this->fsock = fsockopen('unix://' . $address, 0, $errno, $errstr);
@@ -171,14 +172,17 @@ class Agent
         for ($i = 0; $i < $keyCount; $i++) {
             $length = current(unpack('N', fread($this->fsock, 4)));
             $key_blob = fread($this->fsock, $length);
+            $key_str = 'ssh-rsa ' . Base64::encode($key_blob);
             $length = current(unpack('N', fread($this->fsock, 4)));
-            $key_comment = fread($this->fsock, $length);
+            if ($length) {
+                $key_str.= ' ' . fread($this->fsock, $length);
+            }
             $length = current(unpack('N', substr($key_blob, 0, 4)));
             $key_type = substr($key_blob, 4, $length);
             switch ($key_type) {
                 case 'ssh-rsa':
                     $key = new RSA();
-                    $key->load('ssh-rsa ' . base64_encode($key_blob) . ' ' . $key_comment);
+                    $key->load($key_str);
                     break;
                 case 'ssh-dss':
                     // not currently supported

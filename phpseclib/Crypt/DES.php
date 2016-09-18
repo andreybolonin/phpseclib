@@ -42,7 +42,7 @@
 
 namespace phpseclib\Crypt;
 
-use phpseclib\Crypt\Base;
+use phpseclib\Crypt\Common\BlockCipher;
 
 /**
  * Pure-PHP implementation of DES.
@@ -51,7 +51,7 @@ use phpseclib\Crypt\Base;
  * @author  Jim Wigginton <terrafrost@php.net>
  * @access  public
  */
-class DES extends Base
+class DES extends BlockCipher
 {
     /**#@+
      * @access private
@@ -71,36 +71,25 @@ class DES extends Base
     /**
      * Block Length of the cipher
      *
-     * @see \phpseclib\Crypt\Base::block_size
+     * @see \phpseclib\Crypt\Common\SymmetricKey::block_size
      * @var int
      * @access private
      */
     var $block_size = 8;
 
     /**
-     * The Key
+     * Key Length (in bytes)
      *
-     * @see \phpseclib\Crypt\Base::key
-     * @see setKey()
-     * @var string
-     * @access private
-     */
-    var $key = "\0\0\0\0\0\0\0\0";
-
-    /**
-     * The default password key_size used by setPassword()
-     *
-     * @see \phpseclib\Crypt\Base::password_key_size
-     * @see \phpseclib\Crypt\Base::setPassword()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::setKeyLength()
      * @var int
      * @access private
      */
-    var $password_key_size = 8;
+    var $key_length = 8;
 
     /**
      * The mcrypt specific name of the cipher
      *
-     * @see \phpseclib\Crypt\Base::cipher_name_mcrypt
+     * @see \phpseclib\Crypt\Common\SymmetricKey::cipher_name_mcrypt
      * @var string
      * @access private
      */
@@ -109,7 +98,7 @@ class DES extends Base
     /**
      * The OpenSSL names of the cipher / modes
      *
-     * @see \phpseclib\Crypt\Base::openssl_mode_names
+     * @see \phpseclib\Crypt\Common\SymmetricKey::openssl_mode_names
      * @var array
      * @access private
      */
@@ -124,7 +113,7 @@ class DES extends Base
     /**
      * Optimizing value while CFB-encrypting
      *
-     * @see \phpseclib\Crypt\Base::cfb_init_len
+     * @see \phpseclib\Crypt\Common\SymmetricKey::cfb_init_len
      * @var int
      * @access private
      */
@@ -135,8 +124,8 @@ class DES extends Base
      *
      * Used only if $engine == self::ENGINE_INTERNAL
      *
-     * @see \phpseclib\Crypt\DES::_setupKey()
-     * @see \phpseclib\Crypt\DES::_processBlock()
+     * @see self::_setupKey()
+     * @see self::_processBlock()
      * @var int
      * @access private
      */
@@ -145,16 +134,16 @@ class DES extends Base
     /**
      * max possible size of $key
      *
-     * @see \phpseclib\Crypt\DES::setKey()
+     * @see self::setKey()
      * @var string
      * @access private
      */
-    var $key_size_max = 8;
+    var $key_length_max = 8;
 
     /**
      * The Key Schedule
      *
-     * @see \phpseclib\Crypt\DES::_setupKey()
+     * @see self::_setupKey()
      * @var array
      * @access private
      */
@@ -167,8 +156,8 @@ class DES extends Base
      * with each byte containing all bits in the same state as the
      * corresponding bit in the index value.
      *
-     * @see \phpseclib\Crypt\DES::_processBlock()
-     * @see \phpseclib\Crypt\DES::_setupKey()
+     * @see self::_processBlock()
+     * @see self::_setupKey()
      * @var array
      * @access private
      */
@@ -592,18 +581,34 @@ class DES extends Base
     );
 
     /**
+     * Default Constructor.
+     *
+     * @param int $mode
+     * @access public
+     * @throws \InvalidArgumentException if an invalid / unsupported mode is provided
+     */
+    function __construct($mode)
+    {
+        if ($mode == self::MODE_STREAM) {
+            throw new \InvalidArgumentException('Block ciphers cannot be ran in stream mode');
+        }
+
+        parent::__construct($mode);
+    }
+
+    /**
      * Test for engine validity
      *
-     * This is mainly just a wrapper to set things up for Crypt_Base::isValidEngine()
+     * This is mainly just a wrapper to set things up for \phpseclib\Crypt\Common\SymmetricKey::isValidEngine()
      *
-     * @see \phpseclib\Crypt\Base::isValidEngine()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::isValidEngine()
      * @param int $engine
      * @access public
      * @return bool
      */
     function isValidEngine($engine)
     {
-        if ($this->key_size_max == 8) {
+        if ($this->key_length_max == 8) {
             if ($engine == self::ENGINE_OPENSSL) {
                 $this->cipher_name_openssl_ecb = 'des-ecb';
                 $this->cipher_name_openssl = 'des-' . $this->_openssl_translate_mode();
@@ -616,24 +621,18 @@ class DES extends Base
     /**
      * Sets the key.
      *
-     * Keys can be of any length.  DES, itself, uses 64-bit keys (eg. strlen($key) == 8), however, we
-     * only use the first eight, if $key has more then eight characters in it, and pad $key with the
-     * null byte if it is less then eight characters long.
+     * Keys must be 64-bits long or 8 bytes long.
      *
      * DES also requires that every eighth bit be a parity bit, however, we'll ignore that.
      *
-     * If the key is not explicitly set, it'll be assumed to be all zero's.
-     *
-     * @see \phpseclib\Crypt\Base::setKey()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::setKey()
      * @access public
      * @param string $key
      */
     function setKey($key)
     {
-        // We check/cut here only up to max length of the key.
-        // Key padding to the proper length will be done in _setupKey()
-        if (strlen($key) > $this->key_size_max) {
-            $key = substr($key, 0, $this->key_size_max);
+        if (!($this instanceof TripleDES) && strlen($key) != 8) {
+            throw new \LengthException('Key of size ' . strlen($key) . ' not supported by this algorithm. Only keys of size 8 are supported');
         }
 
         // Sets the key
@@ -643,9 +642,9 @@ class DES extends Base
     /**
      * Encrypts a block
      *
-     * @see \phpseclib\Crypt\Base::_encryptBlock()
-     * @see \phpseclib\Crypt\Base::encrypt()
-     * @see \phpseclib\Crypt\DES::encrypt()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::_encryptBlock()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::encrypt()
+     * @see self::encrypt()
      * @access private
      * @param string $in
      * @return string
@@ -658,9 +657,9 @@ class DES extends Base
     /**
      * Decrypts a block
      *
-     * @see \phpseclib\Crypt\Base::_decryptBlock()
-     * @see \phpseclib\Crypt\Base::decrypt()
-     * @see \phpseclib\Crypt\DES::decrypt()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::_decryptBlock()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::decrypt()
+     * @see self::decrypt()
      * @access private
      * @param string $in
      * @return string
@@ -677,8 +676,8 @@ class DES extends Base
      * {@link http://en.wikipedia.org/wiki/Image:Feistel.png Feistel.png} to get a general
      * idea of what this function does.
      *
-     * @see \phpseclib\Crypt\DES::_encryptBlock()
-     * @see \phpseclib\Crypt\DES::_decryptBlock()
+     * @see self::_encryptBlock()
+     * @see self::_decryptBlock()
      * @access private
      * @param string $block
      * @param int $mode
@@ -762,7 +761,7 @@ class DES extends Base
     /**
      * Creates the key schedule
      *
-     * @see \phpseclib\Crypt\Base::_setupKey()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::_setupKey()
      * @access private
      */
     function _setupKey()
@@ -1297,7 +1296,7 @@ class DES extends Base
     /**
      * Setup the performance-optimized function for de/encrypt()
      *
-     * @see \phpseclib\Crypt\Base::_setupInlineCrypt()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::_setupInlineCrypt()
      * @access private
      */
     function _setupInlineCrypt()
@@ -1310,12 +1309,12 @@ class DES extends Base
         $des_rounds = $this->des_rounds;
 
         // We create max. 10 hi-optimized code for memory reason. Means: For each $key one ultra fast inline-crypt function.
-        // (Currently, for Crypt_DES,       one generated $lambda_function cost on php5.5@32bit ~135kb unfreeable mem and ~230kb on php5.5@64bit)
-        // (Currently, for Crypt_TripleDES, one generated $lambda_function cost on php5.5@32bit ~240kb unfreeable mem and ~340kb on php5.5@64bit)
+        // (Currently, for DES, one generated $lambda_function cost on php5.5@32bit ~135kb unfreeable mem and ~230kb on php5.5@64bit)
+        // (Currently, for TripleDES, one generated $lambda_function cost on php5.5@32bit ~240kb unfreeable mem and ~340kb on php5.5@64bit)
         // After that, we'll still create very fast optimized code but not the hi-ultimative code, for each $mode one
         $gen_hi_opt_code = (bool)( count($lambda_functions) < 10 );
 
-        // Generation of a uniqe hash for our generated code
+        // Generation of a unique hash for our generated code
         $code_hash = "Crypt_DES, $des_rounds, {$this->mode}";
         if ($gen_hi_opt_code) {
             // For hi-optimized code, we create for each combination of

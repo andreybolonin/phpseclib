@@ -24,13 +24,7 @@
 
 namespace phpseclib\Crypt;
 
-use phpseclib\Crypt\AES;
-use phpseclib\Crypt\Base;
-use phpseclib\Crypt\Blowfish;
-use phpseclib\Crypt\DES;
-use phpseclib\Crypt\RC4;
-use phpseclib\Crypt\TripleDES;
-use phpseclib\Crypt\Twofish;
+use phpseclib\Crypt\Common\BlockCipher;
 
 /**
  * Pure-PHP Random Number Generator
@@ -54,63 +48,17 @@ class Random
      */
     static function string($length)
     {
-        if (version_compare(PHP_VERSION, '7.0.0', '>=')) {
-            try {
-                return random_bytes($length);
-            } catch (\Error $e) {
-                // If a sufficient source of randomness is unavailable, random_bytes() will emit a warning.
-                // We don't actually need to do anything here. The string() method should just continue
-                // as normal. Note, however, that if we don't have a sufficient source of randomness for
-                // random_bytes(), most of the other calls here will fail too, so we'll end up using
-                // the PHP implementation.
-            }
-        }
-
-        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
-            // method 1. prior to PHP 5.3 this would call rand() on windows hence the function_exists('class_alias') call.
-            // ie. class_alias is a function that was introduced in PHP 5.3
-            if (extension_loaded('mcrypt') && function_exists('class_alias')) {
-                return mcrypt_create_iv($length);
-            }
-            // method 2. openssl_random_pseudo_bytes was introduced in PHP 5.3.0 but prior to PHP 5.3.4 there was,
-            // to quote <http://php.net/ChangeLog-5.php#5.3.4>, "possible blocking behavior". as of 5.3.4
-            // openssl_random_pseudo_bytes and mcrypt_create_iv do the exact same thing on Windows. ie. they both
-            // call php_win32_get_random_bytes():
-            //
-            // https://github.com/php/php-src/blob/7014a0eb6d1611151a286c0ff4f2238f92c120d6/ext/openssl/openssl.c#L5008
-            // https://github.com/php/php-src/blob/7014a0eb6d1611151a286c0ff4f2238f92c120d6/ext/mcrypt/mcrypt.c#L1392
-            //
-            // php_win32_get_random_bytes() is defined thusly:
-            //
-            // https://github.com/php/php-src/blob/7014a0eb6d1611151a286c0ff4f2238f92c120d6/win32/winutil.c#L80
-            //
-            // we're calling it, all the same, in the off chance that the mcrypt extension is not available
-            if (extension_loaded('openssl') && version_compare(PHP_VERSION, '5.3.4', '>=')) {
-                return openssl_random_pseudo_bytes($length);
-            }
-        } else {
-            // method 1. the fastest
-            if (extension_loaded('openssl')) {
-                return openssl_random_pseudo_bytes($length);
-            }
-            // method 2
-            static $fp = true;
-            if ($fp === true) {
-                // warning's will be output unles the error suppression operator is used. errors such as
-                // "open_basedir restriction in effect", "Permission denied", "No such file or directory", etc.
-                $fp = @fopen('/dev/urandom', 'rb');
-            }
-            if ($fp !== true && $fp !== false) { // surprisingly faster than !is_bool() or is_resource()
-                return fread($fp, $length);
-            }
-            // method 3. pretty much does the same thing as method 2 per the following url:
-            // https://github.com/php/php-src/blob/7014a0eb6d1611151a286c0ff4f2238f92c120d6/ext/mcrypt/mcrypt.c#L1391
-            // surprisingly slower than method 2. maybe that's because mcrypt_create_iv does a bunch of error checking that we're
-            // not doing. regardless, this'll only be called if this PHP script couldn't open /dev/urandom due to open_basedir
-            // restrictions or some such
-            if (extension_loaded('mcrypt')) {
-                return mcrypt_create_iv($length, MCRYPT_DEV_URANDOM);
-            }
+        try {
+            return \random_bytes($length);
+        } catch (\Exception $e) {
+            // random_compat will throw an Exception, which in PHP 5 does not implement Throwable
+        } catch (\Throwable $e) {
+            // If a sufficient source of randomness is unavailable, random_bytes() will throw an
+            // object that implements the Throwable interface (Exception, TypeError, Error).
+            // We don't actually need to do anything here. The string() method should just continue
+            // as normal. Note, however, that if we don't have a sufficient source of randomness for
+            // random_bytes(), most of the other calls here will fail too, so we'll end up using
+            // the PHP implementation.
         }
         // at this point we have no choice but to use a pure-PHP CSPRNG
 
@@ -147,15 +95,14 @@ class Random
             session_cache_limiter('');
             session_start();
 
-            $v = $seed = $_SESSION['seed'] = pack('H*', sha1(
-                serialize($_SERVER) .
-                serialize($_POST) .
-                serialize($_GET) .
-                serialize($_COOKIE) .
-                serialize($GLOBALS) .
-                serialize($_SESSION) .
-                serialize($_OLD_SESSION)
-            ));
+            $v = (isset($_SERVER) ? self::safe_serialize($_SERVER) : '') .
+                 (isset($_POST) ? self::safe_serialize($_POST) : '') .
+                 (isset($_GET) ? self::safe_serialize($_GET) : '') .
+                 (isset($_COOKIE) ? self::safe_serialize($_COOKIE) : '') .
+                 self::safe_serialize($GLOBALS) .
+                 self::safe_serialize($_SESSION) .
+                 self::safe_serialize($_OLD_SESSION);
+            $v = $seed = $_SESSION['seed'] = sha1($v, true);
             if (!isset($_SESSION['count'])) {
                 $_SESSION['count'] = 0;
             }
@@ -186,27 +133,27 @@ class Random
             // http://tools.ietf.org/html/rfc4253#section-7.2
             //
             // see the is_string($crypto) part for an example of how to expand the keys
-            $key = pack('H*', sha1($seed . 'A'));
-            $iv = pack('H*', sha1($seed . 'C'));
+            $key = sha1($seed . 'A', true);
+            $iv = sha1($seed . 'C', true);
 
             // ciphers are used as per the nist.gov link below. also, see this link:
             //
             // http://en.wikipedia.org/wiki/Cryptographically_secure_pseudorandom_number_generator#Designs_based_on_cryptographic_primitives
             switch (true) {
                 case class_exists('\phpseclib\Crypt\AES'):
-                    $crypto = new AES(Base::MODE_CTR);
+                    $crypto = new AES(BlockCipher::MODE_CTR);
                     break;
                 case class_exists('\phpseclib\Crypt\Twofish'):
-                    $crypto = new Twofish(Base::MODE_CTR);
+                    $crypto = new Twofish(BlockCipher::MODE_CTR);
                     break;
                 case class_exists('\phpseclib\Crypt\Blowfish'):
-                    $crypto = new Blowfish(Base::MODE_CTR);
+                    $crypto = new Blowfish(BlockCipher::MODE_CTR);
                     break;
                 case class_exists('\phpseclib\Crypt\TripleDES'):
-                    $crypto = new TripleDES(Base::MODE_CTR);
+                    $crypto = new TripleDES(BlockCipher::MODE_CTR);
                     break;
                 case class_exists('\phpseclib\Crypt\DES'):
-                    $crypto = new DES(Base::MODE_CTR);
+                    $crypto = new DES(BlockCipher::MODE_CTR);
                     break;
                 case class_exists('\phpseclib\Crypt\RC4'):
                     $crypto = new RC4();
@@ -215,8 +162,8 @@ class Random
                     throw new \RuntimeException(__CLASS__ . ' requires at least one symmetric cipher be loaded');
             }
 
-            $crypto->setKey($key);
-            $crypto->setIV($iv);
+            $crypto->setKey(substr($key, 0, $crypto->getKeyLength() >> 3));
+            $crypto->setIV(substr($iv, 0, $crypto->getBlockLength() >> 3));
             $crypto->enableContinuousBuffer();
         }
 
@@ -238,5 +185,37 @@ class Random
             $result.= $r;
         }
         return substr($result, 0, $length);
+    }
+
+    /**
+     * Safely serialize variables
+     *
+     * If a class has a private __sleep() it'll emit a warning
+     *
+     * @param mixed $arr
+     * @access public
+     */
+    static function safe_serialize(&$arr)
+    {
+        if (is_object($arr)) {
+            return '';
+        }
+        if (!is_array($arr)) {
+            return serialize($arr);
+        }
+        // prevent circular array recursion
+        if (isset($arr['__phpseclib_marker'])) {
+            return '';
+        }
+        $safearr = array();
+        $arr['__phpseclib_marker'] = true;
+        foreach (array_keys($arr) as $key) {
+            // do not recurse on the '__phpseclib_marker' key itself, for smaller memory usage
+            if ($key !== '__phpseclib_marker') {
+                $safearr[$key] = self::safe_serialize($arr[$key]);
+            }
+        }
+        unset($arr['__phpseclib_marker']);
+        return serialize($safearr);
     }
 }

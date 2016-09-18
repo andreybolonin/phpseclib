@@ -18,7 +18,7 @@ class Unit_File_ASN1Test extends PhpseclibTestCase
         $KDC_REP = array(
             'type' => ASN1::TYPE_SEQUENCE,
             'children' => array(
-                 'pvno' => array(
+                'pvno' => array(
                     'constant' => 0,
                     'optional' => true,
                     'explicit' => true,
@@ -288,5 +288,15 @@ class Unit_File_ASN1Test extends PhpseclibTestCase
         $decoded = $asn1->decodeBER("\xa0\x00");
         $this->assertInternalType('array', $decoded);
         $this->assertCount(0, $decoded[0]['content']);
+    }
+
+    /**
+     * @group github1027
+     */
+    public function testInfiniteLoop()
+    {
+        $asn1 = new ASN1();
+        $data = base64_decode('MD6gJQYKKwYBBAGCNxQCA6AXDBVvZmZpY2VAY2VydGRpZ2l0YWwucm+BFW9mZmljZUBjZXJ0ZGlnaXRhbC5ybw==');
+        $asn1->decodeBER($data);
     }
 }

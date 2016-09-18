@@ -1,5 +1,85 @@
 # Changelog
 
+## 2.0.3 - 2016-08-18
+
+- BigInteger/RSA: don't compare openssl versions > 1.0 (#946)
+- RSA: don't attempt to use the CRT when zero value components exist (#980)
+- RSA: zero salt length RSA signatures don't work (#1002)
+- ASN1: fix PHP Warning on PHP 7.1 (#1013)
+- X509: set parameter fields to null for CSR's / RSA (#914)
+- CRL optimizations (#1000)
+- SSH2: fix "Expected SSH_FXP_STATUS or ..." error (#999)
+- SSH2: use stream_get_* instead of fread() / fgets() (#967)
+- SFTP: make symlinks support relative target's (#1004)
+- SFTP: fix sending stream resulting in zero byte file (#995)
+
+## 2.0.2 - 2016-06-04
+
+- All Ciphers: fix issue with CBC mode / OpenSSL / continuous buffers / decryption (#938)
+- Random: fix issues with serialize() (#932)
+- RC2: fix issue with decrypting
+- RC4: fix issue with key not being truncated correctly
+- SFTP: nlist() on a non-existent directory resulted in error
+- SFTP: add is_writable, is_writeable, is_readable
+- X509: add IPv6 support for subjectaltname extension (#936)
+
+## 2.0.1 - 2016-01-18
+
+- RSA: fix regression in PSS mode ([#769](https://github.com/phpseclib/phpseclib/pull/769))
+- RSA: fix issue loading PKCS8 specific keys ([#861](https://github.com/phpseclib/phpseclib/pull/861))
+- X509: add getOID() method ([#789](https://github.com/phpseclib/phpseclib/pull/789))
+- X509: improve base64-encoded detection rules ([#855](https://github.com/phpseclib/phpseclib/pull/855))
+- SFTP: fix quirky behavior with put() ([#830](https://github.com/phpseclib/phpseclib/pull/830))
+- SFTP: fix E_NOTICE ([#883](https://github.com/phpseclib/phpseclib/pull/883))
+- SFTP/Stream: fix issue with filenames with hashes ([#901](https://github.com/phpseclib/phpseclib/pull/901))
+- SSH2: add isAuthenticated() method ([#897](https://github.com/phpseclib/phpseclib/pull/897))
+- SSH/Agent: fix possible PHP warning ([#923](https://github.com/phpseclib/phpseclib/issues/923))
+- BigInteger: add __debugInfo() magic method ([#881](https://github.com/phpseclib/phpseclib/pull/881))
+- BigInteger: fix issue with doing bitwise not on 0
+- add getBlockLength() method to symmetric ciphers
+
+## 2.0.0 - 2015-08-04
+
+- Classes were renamed and namespaced ([#243](https://github.com/phpseclib/phpseclib/issues/243))
+- The use of an autoloader is now required (e.g. Composer)
+
+## 1.0.3 - 2016-08-18
+
+- BigInteger/RSA: don't compare openssl versions > 1.0 (#946)
+- RSA: don't attempt to use the CRT when zero value components exist (#980)
+- RSA: zero salt length RSA signatures don't work (#1002)
+- ASN1: fix PHP Warning on PHP 7.1 (#1013)
+- X509: set parameter fields to null for CSR's / RSA (#914)
+- CRL optimizations (#1000)
+- SSH2: fix "Expected SSH_FXP_STATUS or ..." error (#999)
+- SFTP: make symlinks support relative target's (#1004)
+- SFTP: fix sending stream resulting in zero byte file (#995)
+
+## 1.0.2 - 2016-05-07
+
+- All Ciphers: fix issue with CBC mode / OpenSSL / continuous buffers / decryption (#938)
+- Random: fix issues with serialize() (#932)
+- RC2: fix issue with decrypting
+- RC4: fix issue with key not being truncated correctly
+- SFTP: nlist() on a non-existent directory resulted in error
+- SFTP: add is_writable, is_writeable, is_readable
+- RSA: fix PHP4 compatibility issue
+
+## 1.0.1 - 2016-01-18
+
+- RSA: fix regression in PSS mode ([#769](https://github.com/phpseclib/phpseclib/pull/769))
+- RSA: fix issue loading PKCS8 specific keys ([#861](https://github.com/phpseclib/phpseclib/pull/861))
+- X509: add getOID() method ([#789](https://github.com/phpseclib/phpseclib/pull/789))
+- X509: improve base64-encoded detection rules ([#855](https://github.com/phpseclib/phpseclib/pull/855))
+- SFTP: fix quirky behavior with put() ([#830](https://github.com/phpseclib/phpseclib/pull/830))
+- SFTP: fix E_NOTICE ([#883](https://github.com/phpseclib/phpseclib/pull/883))
+- SFTP/Stream: fix issue with filenames with hashes ([#901](https://github.com/phpseclib/phpseclib/pull/901))
+- SSH2: add isAuthenticated() method ([#897](https://github.com/phpseclib/phpseclib/pull/897))
+- SSH/Agent: fix possible PHP warning ([#923](https://github.com/phpseclib/phpseclib/issues/923))
+- BigInteger: add __debugInfo() magic method ([#881](https://github.com/phpseclib/phpseclib/pull/881))
+- BigInteger: fix issue with doing bitwise not on 0
+- add getBlockLength() method to symmetric ciphers
+
 ## 1.0.0 - 2015-08-02
 
 - OpenSSL support for symmetric ciphers ([#507](https://github.com/phpseclib/phpseclib/pull/507))
@@ -60,7 +140,7 @@
  - truncate
  - improved file type detection
  - put() can write to te middle of a file
- - mkdir accepts the same paramters that PHP's mkdir does
+ - mkdir accepts the same parameters that PHP's mkdir does
  - the ability to upload/download 2GB files
 - across-the-board speedups for the various encryption algorithms
 - multi-factor authentication support for Net_SSH2

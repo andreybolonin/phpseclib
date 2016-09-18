@@ -5,15 +5,15 @@
  * @license   http://www.opensource.org/licenses/mit-license.html  MIT License
  */
 
-use phpseclib\Crypt\Base;
+use phpseclib\Crypt\Common\BlockCipher;
 use phpseclib\Crypt\RC2;
 
 class Unit_Crypt_RC2Test extends PhpseclibTestCase
 {
     var $engines = array(
-        Base::ENGINE_INTERNAL => 'internal',
-        Base::ENGINE_MCRYPT => 'mcrypt',
-        Base::ENGINE_OPENSSL => 'OpenSSL',
+        BlockCipher::ENGINE_INTERNAL => 'internal',
+        BlockCipher::ENGINE_MCRYPT => 'mcrypt',
+        BlockCipher::ENGINE_OPENSSL => 'OpenSSL',
     );
 
     public function engineVectors()
@@ -45,7 +45,7 @@ class Unit_Crypt_RC2Test extends PhpseclibTestCase
     // this test is just confirming RC2's key expansion
     public function testEncryptPadding()
     {
-        $rc2 = new RC2(Base::MODE_ECB);
+        $rc2 = new RC2(BlockCipher::MODE_ECB);
 
         // unlike Crypt_AES / Crypt_Rijndael, when you tell Crypt_RC2 that the key length is 128-bits the key isn't null padded to that length.
         // instead, RC2 key expansion is used to extend it out to that length. this isn't done for AES / Rijndael since that doesn't define any
@@ -71,7 +71,7 @@ class Unit_Crypt_RC2Test extends PhpseclibTestCase
 
         // now, to OpenSSL's credit, null padding is internally consistent with OpenSSL. OpenSSL only supports fixed length keys. For rc2, rc4 and
         // bf (blowfish), all keys are 128 bits (or are null padded / truncated accordingly). to use 40-bit or 64-bit keys with RC4 with OpenSSL you
-        // don't use the rc4 algorithm - you use the rc4-40 or rc4-64 algorithm. and similarily, it's not aes-cbc that you use - it's either aes-128-cbc
+        // don't use the rc4 algorithm - you use the rc4-40 or rc4-64 algorithm. and similarly, it's not aes-cbc that you use - it's either aes-128-cbc
         // or aes-192-cbc or aes-256-cbc. this is in contrast to mcrypt, which (with the exception of RC2) actually supports variable and arbitrary
         // length keys.
 
@@ -82,22 +82,22 @@ class Unit_Crypt_RC2Test extends PhpseclibTestCase
 
         $rc2->setKey(str_repeat('d', 16), 128);
 
-        $rc2->setPreferredEngine(Base::ENGINE_INTERNAL);
+        $rc2->setPreferredEngine(BlockCipher::ENGINE_INTERNAL);
         $internal = $rc2->encrypt('d');
 
         $result = pack('H*', 'e3b36057f4821346');
         $this->assertEquals($result, $internal, 'Failed asserting that the internal engine produced the correct result');
 
-        $rc2->setPreferredEngine(Base::ENGINE_MCRYPT);
-        if ($rc2->getEngine() == Base::ENGINE_MCRYPT) {
+        $rc2->setPreferredEngine(BlockCipher::ENGINE_MCRYPT);
+        if ($rc2->getEngine() == BlockCipher::ENGINE_MCRYPT) {
             $mcrypt = $rc2->encrypt('d');
             $this->assertEquals($result, $mcrypt, 'Failed asserting that the mcrypt engine produced the correct result');
         } else {
             self::markTestSkipped('Unable to initialize mcrypt engine');
         }
 
-        $rc2->setPreferredEngine(Base::ENGINE_OPENSSL);
-        if ($rc2->getEngine() == Base::ENGINE_OPENSSL) {
+        $rc2->setPreferredEngine(BlockCipher::ENGINE_OPENSSL);
+        if ($rc2->getEngine() == BlockCipher::ENGINE_OPENSSL) {
             $openssl = $rc2->encrypt('d');
             $this->assertEquals($result, $openssl,  'Failed asserting that the OpenSSL engine produced the correct result');
         } else {
@@ -110,10 +110,11 @@ class Unit_Crypt_RC2Test extends PhpseclibTestCase
      */
     public function testVectors($engine, $engineName, $key, $keyLen, $plaintext, $ciphertext)
     {
-        $rc2 = new RC2();
+        $rc2 = new RC2(RC2::MODE_CBC);
         $rc2->disablePadding();
         $rc2->setKeyLength($keyLen);
         $rc2->setKey(pack('H*', $key)); // could also do $rc2->setKey(pack('H*', $key), $keyLen)
+        $rc2->setIV(str_repeat("\0", $rc2->getBlockLength() >> 3));
         if (!$rc2->isValidEngine($engine)) {
             self::markTestSkipped('Unable to initialize ' . $engineName . ' engine');
         }
@@ -121,5 +122,8 @@ class Unit_Crypt_RC2Test extends PhpseclibTestCase
 
         $result = bin2hex($rc2->encrypt(pack('H*', $plaintext)));
         $this->assertEquals($result, $ciphertext, "Failed asserting that $plaintext yielded expected output in $engineName engine");
+
+        $result = bin2hex($rc2->decrypt(pack('H*', $ciphertext)));
+        $this->assertEquals($result, $plaintext, "Failed asserting that decrypted result yielded $plaintext as a result in $engineName engine");
     }
 }

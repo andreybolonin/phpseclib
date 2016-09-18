@@ -44,7 +44,7 @@
 
 namespace phpseclib\Crypt;
 
-use phpseclib\Crypt\Base;
+use phpseclib\Crypt\Common\StreamCipher;
 
 /**
  * Pure-PHP implementation of RC4.
@@ -53,7 +53,7 @@ use phpseclib\Crypt\Base;
  * @author  Jim Wigginton <terrafrost@php.net>
  * @access  public
  */
-class RC4 extends Base
+class RC4 extends StreamCipher
 {
     /**#@+
      * @access private
@@ -69,26 +69,25 @@ class RC4 extends Base
      * RC4 is a stream cipher
      * so we the block_size to 0
      *
-     * @see \phpseclib\Crypt\Base::block_size
+     * @see \phpseclib\Crypt\Common\SymmetricKey::block_size
      * @var int
      * @access private
      */
     var $block_size = 0;
 
     /**
-     * The default password key_size used by setPassword()
+     * Key Length (in bytes)
      *
-     * @see \phpseclib\Crypt\Base::password_key_size
-     * @see \phpseclib\Crypt\Base::setPassword()
+     * @see \phpseclib\Crypt\RC4::setKeyLength()
      * @var int
      * @access private
      */
-    var $password_key_size = 128; // = 1024 bits
+    var $key_length = 128; // = 1024 bits
 
     /**
      * The mcrypt specific name of the cipher
      *
-     * @see \phpseclib\Crypt\Base::cipher_name_mcrypt
+     * @see \phpseclib\Crypt\Common\SymmetricKey::cipher_name_mcrypt
      * @var string
      * @access private
      */
@@ -97,7 +96,7 @@ class RC4 extends Base
     /**
      * Holds whether performance-optimized $inline_crypt() can/should be used.
      *
-     * @see \phpseclib\Crypt\Base::inline_crypt
+     * @see \phpseclib\Crypt\Common\SymmetricKey::inline_crypt
      * @var mixed
      * @access private
      */
@@ -106,7 +105,7 @@ class RC4 extends Base
     /**
      * The Key
      *
-     * @see \phpseclib\Crypt\RC4::setKey()
+     * @see self::setKey()
      * @var string
      * @access private
      */
@@ -115,7 +114,7 @@ class RC4 extends Base
     /**
      * The Key Stream for decryption and encryption
      *
-     * @see \phpseclib\Crypt\RC4::setKey()
+     * @see self::setKey()
      * @var array
      * @access private
      */
@@ -124,23 +123,21 @@ class RC4 extends Base
     /**
      * Default Constructor.
      *
-     * Determines whether or not the mcrypt extension should be used.
-     *
-     * @see \phpseclib\Crypt\Base::__construct()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::__construct()
      * @return \phpseclib\Crypt\RC4
      * @access public
      */
     function __construct()
     {
-        parent::__construct(Base::MODE_STREAM);
+        parent::__construct(self::MODE_STREAM);
     }
 
     /**
      * Test for engine validity
      *
-     * This is mainly just a wrapper to set things up for Crypt_Base::isValidEngine()
+     * This is mainly just a wrapper to set things up for \phpseclib\Crypt\Common\SymmetricKey::isValidEngine()
      *
-     * @see Crypt_Base::Crypt_Base()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::__construct()
      * @param int $engine
      * @access public
      * @return bool
@@ -148,7 +145,7 @@ class RC4 extends Base
     function isValidEngine($engine)
     {
         switch ($engine) {
-            case Base::ENGINE_OPENSSL:
+            case self::ENGINE_OPENSSL:
                 switch (strlen($this->key)) {
                     case 5:
                         $this->cipher_name_openssl = 'rc4-40';
@@ -168,55 +165,67 @@ class RC4 extends Base
     }
 
     /**
-     * Dummy function.
+     * RC4 does not use an IV
      *
-     * Some protocols, such as WEP, prepend an "initialization vector" to the key, effectively creating a new key [1].
-     * If you need to use an initialization vector in this manner, feel free to prepend it to the key, yourself, before
-     * calling setKey().
-     *
-     * [1] WEP's initialization vectors (IV's) are used in a somewhat insecure way.  Since, in that protocol,
-     * the IV's are relatively easy to predict, an attack described by
-     * {@link http://www.drizzle.com/~aboba/IEEE/rc4_ksaproc.pdf Scott Fluhrer, Itsik Mantin, and Adi Shamir}
-     * can be used to quickly guess at the rest of the key.  The following links elaborate:
-     *
-     * {@link http://www.rsa.com/rsalabs/node.asp?id=2009 http://www.rsa.com/rsalabs/node.asp?id=2009}
-     * {@link http://en.wikipedia.org/wiki/Related_key_attack http://en.wikipedia.org/wiki/Related_key_attack}
-     *
-     * @param string $iv
-     * @see \phpseclib\Crypt\RC4::setKey()
      * @access public
+     * @return bool
      */
-    function setIV($iv)
+    function usesIV()
     {
+        return false;
     }
 
     /**
-     * Sets the key.
+     * Sets the key length
      *
-     * Keys can be between 1 and 256 bytes long.  If they are longer then 256 bytes, the first 256 bytes will
-     * be used.  If no key is explicitly set, it'll be assumed to be a single null byte.
+     * Keys can be between 1 and 256 bytes long.
      *
      * @access public
-     * @see \phpseclib\Crypt\Base::setKey()
-     * @param string $key
+     * @param int $length
+     * @throws \LengthException if the key length is invalid
+     */
+    function setKeyLength($length)
+    {
+        if ($length < 8 || $length > 2048) {
+            throw new \LengthException('Key size of ' . $length . ' bits is not supported by this algorithm. Only keys between 1 and 256 bytes are supported');
+        }
+
+        $this->key_length = $length >> 3;
+
+        parent::setKeyLength($length);
+    }
+
+    /**
+     * Sets the key length
+     *
+     * Keys can be between 1 and 256 bytes long.
+     *
+     * @access public
+     * @param int $length
+     * @throws \LengthException if the key length is invalid
      */
     function setKey($key)
     {
-        parent::setKey(substr($key, 0, 256));
+        $length = strlen($key);
+        if ($length < 1 || $length > 256) {
+            throw new \LengthException('Key size of ' . $length . ' bytes is not supported by RC4. Keys must be between 1 and 256 bytes long');
+        }
+
+        parent::setKey($key);
     }
 
     /**
      * Encrypts a message.
      *
-     * @see \phpseclib\Crypt\Base::decrypt()
-     * @see \phpseclib\Crypt\RC4::_crypt()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::decrypt()
+     * @see self::_crypt()
      * @access public
      * @param string $plaintext
      * @return string $ciphertext
      */
     function encrypt($plaintext)
     {
-        if ($this->engine != Base::ENGINE_INTERNAL) {
+        if ($this->engine != self::ENGINE_INTERNAL) {
             return parent::encrypt($plaintext);
         }
         return $this->_crypt($plaintext, self::ENCRYPT);
@@ -228,15 +237,15 @@ class RC4 extends Base
      * $this->decrypt($this->encrypt($plaintext)) == $this->encrypt($this->encrypt($plaintext)).
      * At least if the continuous buffer is disabled.
      *
-     * @see \phpseclib\Crypt\Base::encrypt()
-     * @see \phpseclib\Crypt\RC4::_crypt()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::encrypt()
+     * @see self::_crypt()
      * @access public
      * @param string $ciphertext
      * @return string $plaintext
      */
     function decrypt($ciphertext)
     {
-        if ($this->engine != Base::ENGINE_INTERNAL) {
+        if ($this->engine != self::ENGINE_INTERNAL) {
             return parent::decrypt($ciphertext);
         }
         return $this->_crypt($ciphertext, self::DECRYPT);
@@ -267,7 +276,7 @@ class RC4 extends Base
     /**
      * Setup the key (expansion)
      *
-     * @see \phpseclib\Crypt\Base::_setupKey()
+     * @see \phpseclib\Crypt\Common\SymmetricKey::_setupKey()
      * @access private
      */
     function _setupKey()
@@ -294,8 +303,8 @@ class RC4 extends Base
     /**
      * Encrypts or decrypts a message.
      *
-     * @see \phpseclib\Crypt\RC4::encrypt()
-     * @see \phpseclib\Crypt\RC4::decrypt()
+     * @see self::encrypt()
+     * @see self::decrypt()
      * @access private
      * @param string $text
      * @param int $mode

@@ -23,8 +23,10 @@
 
 namespace phpseclib\File;
 
+use ParagonIE\ConstantTime\Base64;
 use phpseclib\File\ASN1\Element;
 use phpseclib\Math\BigInteger;
+use phpseclib\Common\Functions\ASN1 as Functions;
 
 /**
  * Pure-PHP ASN.1 Parser
@@ -124,8 +126,8 @@ class ASN1
      *
      * @var array
      * @access private
-     * @see \phpseclib\File\ASN1::setTimeFormat()
-     * @see \phpseclib\File\ASN1::asn1map()
+     * @see self::setTimeFormat()
+     * @see self::asn1map()
      * @link http://php.net/class.datetime
      */
     var $encoded;
@@ -137,7 +139,7 @@ class ASN1
      *
      * @var array
      * @access private
-     * @see \phpseclib\File\ASN1::_encode_der()
+     * @see self::_encode_der()
      */
     var $filters;
 
@@ -224,14 +226,15 @@ class ASN1
      *
      * @param string $encoded
      * @param int $start
+     * @param int $encoded_pos
      * @return array
      * @access private
      */
-    function _decode_ber($encoded, $start = 0)
+    function _decode_ber($encoded, $start = 0, $encoded_pos = 0)
     {
         $current = array('start' => $start);
 
-        $type = ord($this->_string_shift($encoded));
+        $type = ord($encoded[$encoded_pos++]);
         $start++;
 
         $constructed = ($type >> 5) & 1;
@@ -243,23 +246,24 @@ class ASN1
             do {
                 $loop = ord($encoded[0]) >> 7;
                 $tag <<= 7;
-                $tag |= ord($this->_string_shift($encoded)) & 0x7F;
+                $tag |= ord($encoded[$encoded_pos++]) & 0x7F;
                 $start++;
             } while ($loop);
         }
 
         // Length, as discussed in paragraph 8.1.3 of X.690-0207.pdf#page=13
-        $length = ord($this->_string_shift($encoded));
+        $length = ord($encoded[$encoded_pos++]);
         $start++;
         if ($length == 0x80) { // indefinite length
             // "[A sender shall] use the indefinite form (see 8.1.3.6) if the encoding is constructed and is not all
             //  immediately available." -- paragraph 8.1.3.2.c
-            $length = strlen($encoded);
+            $length = strlen($encoded) - $encoded_pos;
         } elseif ($length & 0x80) { // definite length, long form
             // technically, the long form of the length can be represented by up to 126 octets (bytes), but we'll only
             // support it up to four.
             $length&= 0x7F;
-            $temp = $this->_string_shift($encoded, $length);
+            $temp = substr($encoded, $encoded_pos, $length);
+            $encoded_pos += $length;
             // tags of indefinte length don't really have a header length; this length includes the tag
             $current+= array('headerlength' => $length + 2);
             $start+= $length;
@@ -268,11 +272,12 @@ class ASN1
             $current+= array('headerlength' => 2);
         }
 
-        if ($length > strlen($encoded)) {
+        if ($length > (strlen($encoded) - $encoded_pos)) {
             return false;
         }
 
-        $content = $this->_string_shift($encoded, $length);
+        $content = substr($encoded, $encoded_pos, $length);
+        $content_pos = 0;
 
         // at this point $length can be overwritten. it's only accurate for definite length things as is
 
@@ -302,10 +307,10 @@ class ASN1
                 $newcontent = array();
                 $remainingLength = $length;
                 while ($remainingLength > 0) {
-                    $temp = $this->_decode_ber($content, $start);
+                    $temp = $this->_decode_ber($content, $start, $content_pos);
                     $length = $temp['length'];
                     // end-of-content octets - see paragraph 8.1.5
-                    if (substr($content, $length, 2) == "\0\0") {
+                    if (substr($content, $content_pos + $length, 2) == "\0\0") {
                         $length+= 2;
                         $start+= $length;
                         $newcontent[] = $temp;
@@ -314,7 +319,7 @@ class ASN1
                     $start+= $length;
                     $remainingLength-= $length;
                     $newcontent[] = $temp;
-                    $this->_string_shift($content, $length);
+                    $content_pos += $length;
                 }
 
                 return array(
@@ -338,11 +343,11 @@ class ASN1
                 //if (strlen($content) != 1) {
                 //    return false;
                 //}
-                $current['content'] = (bool) ord($content[0]);
+                $current['content'] = (bool) ord($content[$content_pos]);
                 break;
             case self::TYPE_INTEGER:
             case self::TYPE_ENUMERATED:
-                $current['content'] = new BigInteger($content, -256);
+                $current['content'] = new BigInteger(substr($content, $content_pos), -256);
                 break;
             case self::TYPE_REAL: // not currently supported
                 return false;
@@ -351,10 +356,10 @@ class ASN1
                 // the number of unused bits in the final subsequent octet. The number shall be in the range zero to
                 // seven.
                 if (!$constructed) {
-                    $current['content'] = $content;
+                    $current['content'] = substr($content, $content_pos);
                 } else {
-                    $temp = $this->_decode_ber($content, $start);
-                    $length-= strlen($content);
+                    $temp = $this->_decode_ber($content, $start, $content_pos);
+                    $length-= (strlen($content) - $content_pos);
                     $last = count($temp) - 1;
                     for ($i = 0; $i < $last; $i++) {
                         // all subtags should be bit strings
@@ -372,13 +377,13 @@ class ASN1
                 break;
             case self::TYPE_OCTET_STRING:
                 if (!$constructed) {
-                    $current['content'] = $content;
+                    $current['content'] = substr($content, $content_pos);
                 } else {
                     $current['content'] = '';
                     $length = 0;
-                    while (substr($content, 0, 2) != "\0\0") {
-                        $temp = $this->_decode_ber($content, $length + $start);
-                        $this->_string_shift($content, $temp['length']);
+                    while (substr($content, $content_pos, 2) != "\0\0") {
+                        $temp = $this->_decode_ber($content, $length + $start, $content_pos);
+                        $content_pos += $temp['length'];
                         // all subtags should be octet strings
                         //if ($temp['type'] != self::TYPE_OCTET_STRING) {
                         //    return false;
@@ -386,7 +391,7 @@ class ASN1
                         $current['content'].= $temp['content'];
                         $length+= $temp['length'];
                     }
-                    if (substr($content, 0, 2) == "\0\0") {
+                    if (substr($content, $content_pos, 2) == "\0\0") {
                         $length+= 2; // +2 for the EOC
                     }
                 }
@@ -401,26 +406,28 @@ class ASN1
             case self::TYPE_SET:
                 $offset = 0;
                 $current['content'] = array();
-                while (strlen($content)) {
+                $content_len = strlen($content);
+                while ($content_pos < $content_len) {
                     // if indefinite length construction was used and we have an end-of-content string next
                     // see paragraphs 8.1.1.3, 8.1.3.2, 8.1.3.6, 8.1.5, and (for an example) 8.6.4.2
-                    if (!isset($current['headerlength']) && substr($content, 0, 2) == "\0\0") {
+                    if (!isset($current['headerlength']) && substr($content, $content_pos, 2) == "\0\0") {
                         $length = $offset + 2; // +2 for the EOC
                         break 2;
                     }
-                    $temp = $this->_decode_ber($content, $start + $offset);
-                    $this->_string_shift($content, $temp['length']);
+                    $temp = $this->_decode_ber($content, $start + $offset, $content_pos);
+                    $content_pos += $temp['length'];
                     $current['content'][] = $temp;
                     $offset+= $temp['length'];
                 }
                 break;
             case self::TYPE_OBJECT_IDENTIFIER:
-                $temp = ord($this->_string_shift($content));
+                $temp = ord($content[$content_pos++]);
                 $current['content'] = sprintf('%d.%d', floor($temp / 40), $temp % 40);
                 $valuen = 0;
                 // process septets
-                while (strlen($content)) {
-                    $temp = ord($this->_string_shift($content));
+                $content_len = strlen($content);
+                while ($content_pos < $content_len) {
+                    $temp = ord($content[$content_pos++]);
                     $valuen <<= 7;
                     $valuen |= $temp & 0x7F;
                     if (~$temp & 0x80) {
@@ -461,11 +468,11 @@ class ASN1
             case self::TYPE_UTF8_STRING:
                 // ????
             case self::TYPE_BMP_STRING:
-                $current['content'] = $content;
+                $current['content'] = substr($content, $content_pos);
                 break;
             case self::TYPE_UTC_TIME:
             case self::TYPE_GENERALIZED_TIME:
-                $current['content'] = $this->_decodeTime($content, $tag);
+                $current['content'] = $this->_decodeTime(substr($content, $content_pos), $tag);
             default:
         }
 
@@ -497,7 +504,7 @@ class ASN1
         switch (true) {
             case $mapping['type'] == self::TYPE_ANY:
                 $intype = $decoded['type'];
-                if (isset($decoded['constant']) || !isset($this->ANYmap[$intype]) || ($this->encoded[$decoded['start']] & 0x20)) {
+                if (isset($decoded['constant']) || !isset($this->ANYmap[$intype]) || (ord($this->encoded[$decoded['start']]) & 0x20)) {
                     return new Element(substr($this->encoded, $decoded['start'], $decoded['length']));
                 }
                 $inmap = $this->ANYmap[$intype];
@@ -616,7 +623,7 @@ class ASN1
                 }
 
                 // Fail mapping if all input items have not been consumed.
-                return $i < $n? null: $map;
+                return $i < $n ? null: $map;
 
             // the main diff between sets and sequences is the encapsulation of the foreach in another for loop
             case self::TYPE_SET:
@@ -733,7 +740,7 @@ class ASN1
                     return $values;
                 }
             case self::TYPE_OCTET_STRING:
-                return base64_encode($decoded['content']);
+                return Base64::encode($decoded['content']);
             case self::TYPE_NULL:
                 return '';
             case self::TYPE_BOOLEAN:
@@ -820,10 +827,10 @@ class ASN1
             case self::TYPE_SET:    // Children order is not important, thus process in sequence.
             case self::TYPE_SEQUENCE:
                 $tag|= 0x20; // set the constructed bit
-                $value = '';
 
                 // ignore the min and max
                 if (isset($mapping['min']) && isset($mapping['max'])) {
+                    $value = array();
                     $child = $mapping['children'];
 
                     foreach ($source as $content) {
@@ -831,11 +838,21 @@ class ASN1
                         if ($temp === false) {
                             return false;
                         }
-                        $value.= $temp;
+                        $value[]= $temp;
                     }
+                    /* "The encodings of the component values of a set-of value shall appear in ascending order, the encodings being compared
+                        as octet strings with the shorter components being padded at their trailing end with 0-octets.
+                        NOTE - The padding octets are for comparison purposes only and do not appear in the encodings."
+
+                       -- sec 11.6 of http://www.itu.int/ITU-T/studygroups/com17/languages/X.690-0207.pdf  */
+                    if ($mapping['type'] == self::TYPE_SET) {
+                        sort($value);
+                    }
+                    $value = implode($value, '');
                     break;
                 }
 
+                $value = '';
                 foreach ($mapping['children'] as $key => $child) {
                     if (!array_key_exists($key, $source)) {
                         if (!isset($child['optional'])) {
@@ -868,7 +885,7 @@ class ASN1
                          */
                         if (isset($child['explicit']) || $child['type'] == self::TYPE_CHOICE) {
                             $subtag = chr((self::CLASS_CONTEXT_SPECIFIC << 6) | 0x20 | $child['constant']);
-                            $temp = $subtag . $this->_encodeLength(strlen($temp)) . $temp;
+                            $temp = $subtag . Functions::encodeLength(strlen($temp)) . $temp;
                         } else {
                             $subtag = chr((self::CLASS_CONTEXT_SPECIFIC << 6) | (ord($temp[0]) & 0x20) | $child['constant']);
                             $temp = $subtag . substr($temp, 1);
@@ -902,7 +919,7 @@ class ASN1
                     if (isset($child['constant'])) {
                         if (isset($child['explicit']) || $child['type'] == self::TYPE_CHOICE) {
                             $subtag = chr((self::CLASS_CONTEXT_SPECIFIC << 6) | 0x20 | $child['constant']);
-                            $temp = $subtag . $this->_encodeLength(strlen($temp)) . $temp;
+                            $temp = $subtag . Functions::encodeLength(strlen($temp)) . $temp;
                         } else {
                             $subtag = chr((self::CLASS_CONTEXT_SPECIFIC << 6) | (ord($temp[0]) & 0x20) | $child['constant']);
                             $temp = $subtag . substr($temp, 1);
@@ -981,7 +998,7 @@ class ASN1
                    the number of unused bits in the final subsequent octet. The number shall be in the range zero to seven.
 
                    -- http://www.itu.int/ITU-T/studygroups/com17/languages/X.690-0207.pdf#page=16 */
-                $value = base64_decode($source);
+                $value = Base64::decode($source);
                 break;
             case self::TYPE_OBJECT_IDENTIFIER:
                 $oid = preg_match('#(?:\d+\.)+#', $source) ? $source : array_search($source, $this->oids);
@@ -1073,34 +1090,14 @@ class ASN1
 
         if (isset($mapping['cast'])) {
             if (isset($mapping['explicit']) || $mapping['type'] == self::TYPE_CHOICE) {
-                $value = chr($tag) . $this->_encodeLength(strlen($value)) . $value;
+                $value = chr($tag) . Functions::encodeLength(strlen($value)) . $value;
                 $tag = ($mapping['class'] << 6) | 0x20 | $mapping['cast'];
             } else {
                 $tag = ($mapping['class'] << 6) | (ord($temp[0]) & 0x20) | $mapping['cast'];
             }
         }
 
-        return chr($tag) . $this->_encodeLength(strlen($value)) . $value;
-    }
-
-    /**
-     * DER-encode the length
-     *
-     * DER supports lengths up to (2**8)**127, however, we'll only support lengths up to (2**8)**4.  See
-     * {@link http://itu.int/ITU-T/studygroups/com17/languages/X.690-0207.pdf#p=13 X.690 paragraph 8.1.3} for more information.
-     *
-     * @access private
-     * @param int $length
-     * @return string
-     */
-    function _encodeLength($length)
-    {
-        if ($length <= 0x7F) {
-            return chr($length);
-        }
-
-        $temp = ltrim(pack('N', $length), chr(0));
-        return pack('Ca*', 0x80 | strlen($temp), $temp);
+        return chr($tag) . Functions::encodeLength(strlen($value)) . $value;
     }
 
     /**
@@ -1189,23 +1186,6 @@ class ASN1
     function loadFilters($filters)
     {
         $this->filters = $filters;
-    }
-
-    /**
-     * String Shift
-     *
-     * Inspired by array_shift
-     *
-     * @param string $string
-     * @param int $index
-     * @return string
-     * @access private
-     */
-    function _string_shift(&$string, $index = 1)
-    {
-        $substr = substr($string, 0, $index);
-        $string = substr($string, $index);
-        return $substr;
     }
 
     /**
